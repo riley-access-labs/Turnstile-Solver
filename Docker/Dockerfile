@@ -62,9 +62,6 @@ WORKDIR /root/Desktop/Turnstile-Solver
 # Copy requirements and install Python packages
 RUN pip3 install -r requirements.txt --break-system-packages
 
-# Fetch camoufox
-RUN python3 -m camoufox fetch
-
 COPY ./run.sh /usr/bin/
 RUN chmod +x /usr/bin/run.sh
 

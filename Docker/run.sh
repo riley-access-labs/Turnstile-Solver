@@ -38,6 +38,8 @@ git pull origin main || {
     echo "Failed to pull latest changes, continuing with existing code..."
 }
 
+python3 -m camoufox fetch
+
 trap "stop_xrdp_services" SIGKILL SIGTERM SIGHUP SIGINT EXIT
 start_xrdp_services
 
