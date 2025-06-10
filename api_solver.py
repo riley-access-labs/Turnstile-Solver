@@ -59,7 +59,7 @@ class TurnstileAPIServer:
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Turnstile Solver</title>
-        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer async></script>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer async></script>
         <script>
             async function fetchIP() {
                 try {
@@ -72,6 +72,13 @@ class TurnstileAPIServer:
                 }
             }
             window.onload = fetchIP;
+            window.turnstileSuccess = false;
+            window.turnstileToken = null;
+            window.onCaptchaSuccess = function(token) {
+                window.turnstileSuccess = true;
+                window.turnstileToken = token;
+                console.log('Turnstile solved successfully:', token);
+            };
         </script>
     </head>
     <body>
@@ -252,7 +259,7 @@ class TurnstileAPIServer:
                 logger.debug(f"Browser {index}: Setting up page data and route")
 
             url_with_slash = url + "/" if not url.endswith("/") else url
-            turnstile_div = f'<div id="cf-turnstile" class="cf-turnstile" data-sitekey="{sitekey}" data-callback="onCaptchaSuccess"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
+            turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}" data-callback="onCaptchaSuccess"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
             page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
             await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
@@ -268,7 +275,16 @@ class TurnstileAPIServer:
 
             for _ in range(20):
                 try:
-                    turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=2000)
+                    turnstile_check = await page.input_value("//input[@name='cf-turnstile-response']", timeout=2000)
+                    is_solved = await page.evaluate("""
+                        return window.turnstileSuccess;
+                    """)
+                    if is_solved:
+                        turnstile_check = await page.evaluate("""
+                            return window.turnstileToken;
+                        """)
+                        break
+                    
                     if turnstile_check == "":
                         if self.debug:
                             logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
