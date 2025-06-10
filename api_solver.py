@@ -193,38 +193,43 @@ class TurnstileAPIServer:
         context_options = {}
         
         if used_proxy:
-            parts = used_proxy.split(':')
-            if len(parts) == 2:
-                # Format: host:port
-                proxy_host, proxy_port = parts
-                context_options["proxy"] = {"server": f"http://{proxy_host}:{proxy_port}"}
-            elif len(parts) == 3:
-                # Format: scheme://host:port or host:port:scheme
-                if '://' in parts[0]:
-                    # Format: scheme://host:port
-                    context_options["proxy"] = {"server": f"{used_proxy}"}
-                else:
+            # Check for scheme://host:port format first
+            if '://' in used_proxy:
+                context_options["proxy"] = {"server": f"{used_proxy}"}
+            else:
+                parts = used_proxy.split(':')
+                if len(parts) == 2:
+                    # Format: host:port
+                    proxy_host, proxy_port = parts
+                    context_options["proxy"] = {"server": f"http://{proxy_host}:{proxy_port}"}
+                elif len(parts) == 3:
                     # Format: host:port:scheme
                     proxy_host, proxy_port, proxy_scheme = parts
                     context_options["proxy"] = {"server": f"{proxy_scheme}://{proxy_host}:{proxy_port}"}
-            elif len(parts) == 4:
-                # Format: host:port:username:password
-                proxy_host, proxy_port, proxy_user, proxy_pass = parts
-                context_options["proxy"] = {
-                    "server": f"http://{proxy_host}:{proxy_port}", 
-                    "username": proxy_user, 
-                    "password": proxy_pass
-                }
-            elif len(parts) == 5:
-                # Format: scheme:host:port:username:password
-                proxy_scheme, proxy_host, proxy_port, proxy_user, proxy_pass = parts
-                context_options["proxy"] = {
-                    "server": f"{proxy_scheme}://{proxy_host}:{proxy_port}", 
-                    "username": proxy_user, 
-                    "password": proxy_pass
-                }
-            else:
-                logger.error(f"Browser {index}: Invalid proxy format: {used_proxy}")
+                elif len(parts) >= 4:
+                    # Format: host:port:username:password (username/password may contain colons)
+                    proxy_host = parts[0]
+                    proxy_port = parts[1]
+                    
+                    # Join the remaining parts and split on the last colon to separate username and password
+                    remaining = ':'.join(parts[2:])
+                    if ':' in remaining:
+                        # Find the last colon to separate username and password
+                        last_colon_idx = remaining.rfind(':')
+                        proxy_user = remaining[:last_colon_idx]
+                        proxy_pass = remaining[last_colon_idx + 1:]
+                    else:
+                        # No password, only username
+                        proxy_user = remaining
+                        proxy_pass = ""
+                    
+                    context_options["proxy"] = {
+                        "server": f"http://{proxy_host}:{proxy_port}", 
+                        "username": proxy_user, 
+                        "password": proxy_pass
+                    }
+                else:
+                    logger.error(f"Browser {index}: Invalid proxy format: {used_proxy}")
         
         if effective_useragent:
             context_options["user_agent"] = effective_useragent
