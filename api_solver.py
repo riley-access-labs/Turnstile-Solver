@@ -299,12 +299,14 @@ class TurnstileAPIServer:
             if self.debug:
                 logger.debug(f"Browser {index}: Starting Turnstile solve for URL: {url} with Sitekey: {sitekey} | Proxy: {used_proxy}")
 
-            url_with_slash = url + "/" if not url.endswith("/") else url
+            # Create turnstile div with proper attributes
             turnstile_div = f'<div id="cf-turnstile" class="cf-turnstile" data-sitekey="{sitekey}" data-callback="onCaptchaSuccess"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
             page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
-            await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
-            await page.goto(url_with_slash, wait_until="networkidle", timeout=15000)
+            # Intercept all requests to the URL and serve our custom HTML instead of the original page
+            await page.route(url, lambda route: route.fulfill(body=page_data, status=200))
+            await page.route(f"{url}/**", lambda route: route.fulfill(body=page_data, status=200))
+            await page.goto(url, wait_until="networkidle", timeout=15000)
 
             # Wait for turnstile widget to load
             await page.wait_for_selector(".cf-turnstile", state="attached", timeout=10000)
