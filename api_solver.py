@@ -92,8 +92,6 @@ class TurnstileAPIServer:
         self.proxy_support = proxy_support
         self.browser_pool = asyncio.Queue()
         self.browser_args = []
-        self.browsers_initialized = False
-        self.initialization_lock = asyncio.Lock()
         if useragent:
             self.browser_args.append(f"--user-agent={useragent}")
 
@@ -120,23 +118,19 @@ class TurnstileAPIServer:
 
     def _setup_routes(self) -> None:
         """Set up the application routes."""
+        self.app.before_serving(self._startup)
         self.app.route('/turnstile', methods=['GET'])(self.process_turnstile)
         self.app.route('/result', methods=['GET'])(self.get_result)
         self.app.route('/')(self.index)
 
-    async def _ensure_browsers_initialized(self) -> None:
-        """Ensure browsers are initialized (called on first Turnstile request)."""
-        if self.browsers_initialized:
-            return
-            
-        async with self.initialization_lock:
-            # Double-check in case another task initialized while we were waiting
-            if self.browsers_initialized:
-                return
-                
-            logger.info("Initializing browsers on first Turnstile request")
+    async def _startup(self) -> None:
+        """Initialize the browser and page pool on startup."""
+        logger.info("Starting browser initialization")
+        try:
             await self._initialize_browser()
-            self.browsers_initialized = True
+        except Exception as e:
+            logger.error(f"Failed to initialize browser: {str(e)}")
+            raise
 
     async def _initialize_browser(self) -> None:
         """Initialize the browser and create the page pool."""
@@ -168,9 +162,6 @@ class TurnstileAPIServer:
     async def _solve_turnstile(self, task_id: str, url: str, sitekey: str, action: str = None, cdata: str = None, proxy: str = None, useragent: str = None):
         """Solve the Turnstile challenge."""
         used_proxy = None
-
-        # Ensure browsers are initialized before proceeding
-        await self._ensure_browsers_initialized()
 
         index, browser = await self.browser_pool.get()
 
@@ -257,7 +248,7 @@ class TurnstileAPIServer:
                 logger.debug(f"Browser {index}: Setting up page data and route")
 
             url_with_slash = url + "/" if not url.endswith("/") else url
-            turnstile_div = f'<div id="cf-turnstile" class="cf-turnstile" style="background: white;" data-sitekey="{sitekey}" data-callback="onCaptchaSuccess"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
+            turnstile_div = f'<div id="cf-turnstile" class="cf-turnstile" data-sitekey="{sitekey}" data-callback="onCaptchaSuccess"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
             page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
             await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
@@ -273,13 +264,14 @@ class TurnstileAPIServer:
 
             for _ in range(20):
                 try:
+                    # Click the captcha first before trying to get response
+                    await page.locator("//div[@class='cf-turnstile']").click(timeout=1000)
+                    await asyncio.sleep(0.5)
+                    
                     turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=2000)
                     if turnstile_check == "":
                         if self.debug:
                             logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
-                        
-                        await page.locator("//div[@class='cf-turnstile']").click(timeout=1000)
-                        await asyncio.sleep(0.5)
                     else:
                         elapsed_time = round(time.time() - start_time, 3)
 
