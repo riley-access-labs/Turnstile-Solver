@@ -309,7 +309,7 @@ class TurnstileAPIServer:
             await page.goto(url, wait_until="networkidle", timeout=15000)
 
             # Wait for turnstile widget to load
-            await page.wait_for_selector(".cf-turnstile", state="attached", timeout=10000)
+            await page.wait_for_selector(".cf-turnstile", timeout=10000)
             
             # Set widget dimensions immediately after it loads
             await page.eval_on_selector(".cf-turnstile", "el => el.style.width = '70px'")
