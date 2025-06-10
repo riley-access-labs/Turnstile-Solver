@@ -6,6 +6,7 @@ ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 ENV TZ=America/Los_Angeles
 ENV RUN_API_SOLVER=true
+ENV DEBUG=true
 
 
 RUN apt-get update && \
