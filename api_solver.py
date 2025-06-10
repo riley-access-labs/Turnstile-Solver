@@ -198,7 +198,9 @@ class TurnstileAPIServer:
         if used_proxy:
             # Check for scheme://host:port format first
             if '://' in used_proxy:
-                context_options["proxy"] = {"server": f"{used_proxy}"}
+                parts = proxy.split(':')
+                proxy_scheme, proxy_ip, proxy_port, proxy_user, proxy_pass = parts
+                context_options["proxy"] = {"server": f"{proxy_scheme}://{proxy_ip}:{proxy_port}", "username": proxy_user, "password": proxy_pass}
             else:
                 parts = used_proxy.split(':')
                 if len(parts) == 2:
