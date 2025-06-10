@@ -71,12 +71,10 @@ cd Turnstile-Solver || {
 
 pip3 install -r requirements.txt --break-system-packages
 
-python3 -m camoufox fetch
-
 trap "stop_xrdp_services" SIGKILL SIGTERM SIGHUP SIGINT EXIT
 start_xrdp_services
 
 if [ "$RUN_API_SOLVER" = "true" ]; then
     echo "Starting API solver in headful mode..."
-    xvfb-run -a python3 /root/Desktop/Turnstile-Solver/api_solver.py --browser_type camoufox --host 0.0.0.0 --debug=$DEBUG
+    xvfb-run -a python3 /root/Desktop/Turnstile-Solver/api_solver.py --browser_type=camoufox --host=0.0.0.0 --debug=$DEBUG --headless=False
 fi
