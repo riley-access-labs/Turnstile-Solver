@@ -268,45 +268,62 @@ class TurnstileAPIServer:
             if self.debug:
                 logger.debug(f"Browser {index}: Setting up Turnstile widget dimensions")
 
+            # Wait for the turnstile widget to load first
+            await page.wait_for_selector("//div[@class='cf-turnstile']", timeout=10000)
             await page.eval_on_selector("//div[@class='cf-turnstile']", "el => el.style.width = '70px'")
 
             if self.debug:
                 logger.debug(f"Browser {index}: Starting Turnstile response retrieval loop")
 
-            for _ in range(20):
+            for attempt in range(20):
                 try:
-                    turnstile_check = await page.input_value("//input[@name='cf-turnstile-response']", timeout=2000)
-                    is_solved = await page.evaluate("""
-                        return window.turnstileSuccess;
-                    """)
-                    if is_solved:
-                        turnstile_check = await page.evaluate("""
-                            return window.turnstileToken;
-                        """)
-                        break
+                    # Check if turnstile input field exists
+                    try:
+                        turnstile_check = await page.input_value("//input[@name='cf-turnstile-response']", timeout=2000)
+                    except:
+                        turnstile_check = ""
                     
-                    if turnstile_check == "":
-                        if self.debug:
-                            logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
-                        
-                        await page.locator("//div[@class='cf-turnstile']").click(timeout=1000)
-                        await asyncio.sleep(0.5)
-                    else:
+                    # Check if solved via JavaScript callback
+                    is_solved = await page.evaluate("() => window.turnstileSuccess || false")
+                    
+                    if is_solved:
+                        turnstile_check = await page.evaluate("() => window.turnstileToken || ''")
+                        if turnstile_check:
+                            elapsed_time = round(time.time() - start_time, 3)
+                            logger.success(f"Browser {index}: Successfully solved captcha - {COLORS.get('MAGENTA')}{turnstile_check[:10]}{COLORS.get('RESET')} in {COLORS.get('GREEN')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                            self.results[task_id] = {"value": turnstile_check, "elapsed_time": elapsed_time}
+                            self._save_results()
+                            break
+                    
+                    if turnstile_check and turnstile_check != "":
                         elapsed_time = round(time.time() - start_time, 3)
-
                         logger.success(f"Browser {index}: Successfully solved captcha - {COLORS.get('MAGENTA')}{turnstile_check[:10]}{COLORS.get('RESET')} in {COLORS.get('GREEN')}{elapsed_time}{COLORS.get('RESET')} Seconds")
-
                         self.results[task_id] = {"value": turnstile_check, "elapsed_time": elapsed_time}
                         self._save_results()
                         break
-                except:
-                    pass
+                    else:
+                        if self.debug:
+                            logger.debug(f"Browser {index}: Attempt {attempt + 1} - No Turnstile response yet")
+                        
+                        # Try to click the turnstile widget
+                        try:
+                            await page.locator("//div[@class='cf-turnstile']").click(timeout=1000)
+                        except:
+                            pass
+                        
+                        await asyncio.sleep(0.5)
+                        
+                except Exception as e:
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Attempt {attempt + 1} failed: {str(e)}")
+                    await asyncio.sleep(0.5)
 
-            if self.results.get(task_id) == "CAPTCHA_NOT_READY":
+            # Check if captcha was solved after the loop
+            if task_id in self.results and self.results[task_id] == "CAPTCHA_NOT_READY":
                 elapsed_time = round(time.time() - start_time, 3)
                 self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
                 if self.debug:
-                    logger.error(f"Browser {index}: Error solving Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                    logger.error(f"Browser {index}: Failed to solve Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
         except Exception as e:
             elapsed_time = round(time.time() - start_time, 3)
             self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
