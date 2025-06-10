@@ -71,6 +71,8 @@ cd Turnstile-Solver || {
 
 pip3 install -r requirements.txt --break-system-packages
 
+python3 -m camoufox fetch
+
 trap "stop_xrdp_services" SIGKILL SIGTERM SIGHUP SIGINT EXIT
 start_xrdp_services
 

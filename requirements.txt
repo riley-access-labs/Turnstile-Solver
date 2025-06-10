@@ -3,4 +3,3 @@ asyncio
 argparse
 patchright
 camoufox[geoip]
-camoufox
