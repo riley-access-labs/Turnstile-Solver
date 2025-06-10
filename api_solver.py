@@ -72,11 +72,7 @@ class TurnstileAPIServer:
                 }
             }
             window.onload = fetchIP;
-            window.turnstileSuccess = false;
-            window.turnstileToken = null;
             window.onCaptchaSuccess = function(token) {
-                window.turnstileSuccess = true;
-                window.turnstileToken = token;
                 console.log('Turnstile solved successfully:', token);
             };
         </script>
@@ -267,6 +263,9 @@ class TurnstileAPIServer:
             if self.debug:
                 logger.debug(f"Browser {index}: Waiting for network idle")
             await page.wait_for_load_state("networkidle")
+
+            if self.debug:
+                logger.debug(f"Browser {index}: Waiting for DOM Content Loaded")
             await page.wait_for_load_state("domcontentloaded")
 
             if self.debug:
@@ -279,16 +278,7 @@ class TurnstileAPIServer:
 
             for _ in range(20):
                 try:
-                    turnstile_check = await page.input_value("//input[@name='cf-turnstile-response']", timeout=2000)
-                    is_solved = await page.evaluate("""
-                        return window.turnstileSuccess;
-                    """)
-                    if is_solved:
-                        turnstile_check = await page.evaluate("""
-                            return window.turnstileToken;
-                        """)
-                        break
-                    
+                    turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=2000)
                     if turnstile_check == "":
                         if self.debug:
                             logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
