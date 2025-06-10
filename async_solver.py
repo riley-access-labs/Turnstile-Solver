@@ -67,9 +67,9 @@ class AsyncTurnstileSolver:
         <script>
             async function fetchIP() {
                 try {
-                    const response = await fetch('https://api64.ipify.org?format=json');
-                    const data = await response.json();
-                    document.getElementById('ip-display').innerText = `Your IP: ${data.ip}`;
+                    const response = await fetch('https://checkip.amazonaws.com');
+                    const ip = (await response.text()).trim();
+                    document.getElementById('ip-display').innerText = `Your IP: ${ip}`;
                 } catch (error) {
                     console.error('Error fetching IP:', error);
                     document.getElementById('ip-display').innerText = 'Failed to fetch IP';
