@@ -276,7 +276,7 @@ class TurnstileAPIServer:
 
             for _ in range(20):
                 try:
-                    turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=2000)
+                    turnstile_check = await page.input_value("//input[@name='cf-turnstile-response']", timeout=2000)
                     if turnstile_check == "":
                         if self.debug:
                             logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
