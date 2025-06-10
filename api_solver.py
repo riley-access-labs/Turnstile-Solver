@@ -304,7 +304,7 @@ class TurnstileAPIServer:
             page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
             await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
-            await page.goto(url_with_slash, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(url_with_slash, wait_until="networkidle", timeout=15000)
 
             # Wait for turnstile widget to load
             await page.wait_for_selector(".cf-turnstile", state="attached", timeout=10000)
@@ -316,11 +316,10 @@ class TurnstileAPIServer:
                 logger.debug(f"Browser {index}: Starting optimized Turnstile response retrieval")
 
             # Optimized polling with exponential backoff and multiple detection methods
-            attempt = 0
             max_attempts = 30
             poll_interval = 0.1  # Start with faster polling
             
-            while attempt < max_attempts:
+            for attempt in range(max_attempts):
                 try:
                     # Try multiple methods to detect completion
                     turnstile_check = None
@@ -356,13 +355,7 @@ class TurnstileAPIServer:
                             break
                     except:
                         pass
-                    
-                    # Click turnstile if no response yet (only first few attempts)
-                    if attempt < 5:
-                        try:
-                            await page.locator(".cf-turnstile").click(timeout=500)
-                        except:
-                            pass
+                    await page.locator(".cf-turnstile").click(timeout=500)
                     
                     attempt += 1
                     
