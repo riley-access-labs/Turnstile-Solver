@@ -63,7 +63,7 @@ cd /root/Desktop || {
     exit 1
 }
 
-git clone https://github.com/Theyka/Turnstile-Solver.git
+git clone https://github.com/riley-access-labs/Turnstile-Solver.git
 cd Turnstile-Solver || {
     echo "Failed to change directory to Turnstile-Solver"
     exit 1

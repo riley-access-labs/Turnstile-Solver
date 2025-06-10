@@ -159,30 +159,67 @@ class TurnstileAPIServer:
         logger.success(f"Browser pool initialized with {self.browser_pool.qsize()} browsers")
 
 
-    async def _solve_turnstile(self, task_id: str, url: str, sitekey: str, action: str = None, cdata: str = None):
+    async def _solve_turnstile(self, task_id: str, url: str, sitekey: str, action: str = None, cdata: str = None, proxy: str = None):
         """Solve the Turnstile challenge."""
-        proxy = None
+        used_proxy = None
 
         index, browser = await self.browser_pool.get()
 
-        if self.proxy_support:
+        # Use proxy from API parameter if provided, otherwise fallback to file-based proxy selection
+        if proxy:
+            # Proxy provided via API
+            used_proxy = proxy
+            if self.debug:
+                logger.debug(f"Browser {index}: Using API-provided proxy: {proxy}")
+        elif self.proxy_support:
+            # Fallback to file-based proxy selection
             proxy_file_path = os.path.join(os.getcwd(), "proxies.txt")
+            
+            try:
+                with open(proxy_file_path) as proxy_file:
+                    proxies = [line.strip() for line in proxy_file if line.strip()]
 
-            with open(proxy_file_path) as proxy_file:
-                proxies = [line.strip() for line in proxy_file if line.strip()]
+                used_proxy = random.choice(proxies) if proxies else None
+                if self.debug and used_proxy:
+                    logger.debug(f"Browser {index}: Using file-based proxy: {used_proxy}")
+            except FileNotFoundError:
+                if self.debug:
+                    logger.warning(f"Browser {index}: proxies.txt file not found, proceeding without proxy")
 
-            proxy = random.choice(proxies) if proxies else None
-
-            if proxy:
-                parts = proxy.split(':')
-                if len(parts) == 3:
-                    context = await browser.new_context(proxy={"server": f"{proxy}"})
-                elif len(parts) == 5:
-                    proxy_scheme, proxy_ip, proxy_port, proxy_user, proxy_pass = parts
-                    context = await browser.new_context(proxy={"server": f"{proxy_scheme}://{proxy_ip}:{proxy_port}", "username": proxy_user, "password": proxy_pass})
+        # Configure browser context with proxy if available
+        if used_proxy:
+            parts = used_proxy.split(':')
+            if len(parts) == 2:
+                # Format: host:port
+                proxy_host, proxy_port = parts
+                context = await browser.new_context(proxy={"server": f"http://{proxy_host}:{proxy_port}"})
+            elif len(parts) == 3:
+                # Format: scheme://host:port or host:port:scheme
+                if '://' in parts[0]:
+                    # Format: scheme://host:port
+                    context = await browser.new_context(proxy={"server": f"{used_proxy}"})
                 else:
-                    raise ValueError("Invalid proxy format")
+                    # Format: host:port:scheme
+                    proxy_host, proxy_port, proxy_scheme = parts
+                    context = await browser.new_context(proxy={"server": f"{proxy_scheme}://{proxy_host}:{proxy_port}"})
+            elif len(parts) == 4:
+                # Format: host:port:username:password
+                proxy_host, proxy_port, proxy_user, proxy_pass = parts
+                context = await browser.new_context(proxy={
+                    "server": f"http://{proxy_host}:{proxy_port}", 
+                    "username": proxy_user, 
+                    "password": proxy_pass
+                })
+            elif len(parts) == 5:
+                # Format: scheme:host:port:username:password
+                proxy_scheme, proxy_host, proxy_port, proxy_user, proxy_pass = parts
+                context = await browser.new_context(proxy={
+                    "server": f"{proxy_scheme}://{proxy_host}:{proxy_port}", 
+                    "username": proxy_user, 
+                    "password": proxy_pass
+                })
             else:
+                logger.error(f"Browser {index}: Invalid proxy format: {used_proxy}")
                 context = await browser.new_context()
         else:
             context = await browser.new_context()
@@ -193,7 +230,7 @@ class TurnstileAPIServer:
 
         try:
             if self.debug:
-                logger.debug(f"Browser {index}: Starting Turnstile solve for URL: {url} with Sitekey: {sitekey} | Proxy: {proxy}")
+                logger.debug(f"Browser {index}: Starting Turnstile solve for URL: {url} with Sitekey: {sitekey} | Proxy: {used_proxy}")
                 logger.debug(f"Browser {index}: Setting up page data and route")
 
             url_with_slash = url + "/" if not url.endswith("/") else url
@@ -254,6 +291,7 @@ class TurnstileAPIServer:
         sitekey = request.args.get('sitekey')
         action = request.args.get('action')
         cdata = request.args.get('cdata')
+        proxy = request.args.get('proxy')
 
         if not url or not sitekey:
             return jsonify({
@@ -265,7 +303,7 @@ class TurnstileAPIServer:
         self.results[task_id] = "CAPTCHA_NOT_READY"
 
         try:
-            asyncio.create_task(self._solve_turnstile(task_id=task_id, url=url, sitekey=sitekey, action=action, cdata=cdata))
+            asyncio.create_task(self._solve_turnstile(task_id=task_id, url=url, sitekey=sitekey, action=action, cdata=cdata, proxy=proxy))
 
             if self.debug:
                 logger.debug(f"Request completed with taskid {task_id}.")
@@ -312,13 +350,28 @@ class TurnstileAPIServer:
                        <code class="bg-red-700 text-white px-2 py-1 rounded">/turnstile</code> with the following query parameters:</p>
 
                     <ul class="list-disc pl-6 mb-6 text-gray-300">
-                        <li><strong>url</strong>: The URL where Turnstile is to be validated</li>
-                        <li><strong>sitekey</strong>: The site key for Turnstile</li>
+                        <li><strong>url</strong> (required): The URL where Turnstile is to be validated</li>
+                        <li><strong>sitekey</strong> (required): The site key for Turnstile</li>
+                        <li><strong>action</strong> (optional): Action parameter for Turnstile</li>
+                        <li><strong>cdata</strong> (optional): Custom data parameter for Turnstile</li>
+                        <li><strong>proxy</strong> (optional): Proxy to use for the request</li>
                     </ul>
 
                     <div class="bg-gray-700 p-4 rounded-lg mb-6 border border-red-500">
                         <p class="font-semibold mb-2 text-red-400">Example usage:</p>
                         <code class="text-sm break-all text-red-300">/turnstile?url=https://example.com&sitekey=sitekey</code>
+                        <br><br>
+                        <p class="font-semibold mb-2 text-red-400">With proxy:</p>
+                        <code class="text-sm break-all text-red-300">/turnstile?url=https://example.com&sitekey=sitekey&proxy=127.0.0.1:8080</code>
+                        <br><br>
+                        <p class="font-semibold mb-2 text-red-400">Proxy formats supported:</p>
+                        <ul class="text-xs text-red-300 mt-2 space-y-1">
+                            <li>• host:port (e.g., 127.0.0.1:8080)</li>
+                            <li>• scheme://host:port (e.g., http://127.0.0.1:8080)</li>
+                            <li>• host:port:scheme (e.g., 127.0.0.1:8080:http)</li>
+                            <li>• host:port:username:password (e.g., 127.0.0.1:8080:user:pass)</li>
+                            <li>• scheme:host:port:username:password (e.g., http:127.0.0.1:8080:user:pass)</li>
+                        </ul>
                     </div>
 
                     <div class="bg-red-900 border-l-4 border-red-600 p-4 mb-6">
