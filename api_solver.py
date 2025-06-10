@@ -145,7 +145,7 @@ class TurnstileAPIServer:
         if self.browser_type in ['chromium', 'chrome', 'msedge']:
             playwright = await async_playwright().start()
         elif self.browser_type == "camoufox":
-            camoufox = AsyncCamoufox(headless=self.headless)
+            camoufox = AsyncCamoufox(headless=self.headless, geoip=True)
 
         for _ in range(self.thread_count):
             if self.browser_type in ['chromium', 'chrome', 'msedge']:
