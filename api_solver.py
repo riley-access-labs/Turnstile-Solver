@@ -59,7 +59,7 @@ class TurnstileAPIServer:
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Turnstile Solver</title>
-        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer async></script>
         <script>
             async function fetchIP() {
                 try {
@@ -428,6 +428,7 @@ def parse_args():
 def create_app(headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool) -> Quart:
     server = TurnstileAPIServer(headless=headless, useragent=useragent, debug=debug, browser_type=browser_type, thread=thread, proxy_support=proxy_support)
     return server.app
+
 
 
 if __name__ == '__main__':
