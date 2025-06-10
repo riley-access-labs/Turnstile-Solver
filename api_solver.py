@@ -59,7 +59,7 @@ class TurnstileAPIServer:
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Turnstile Solver</title>
-        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer async></script>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer async></script>
         <script>
             async function fetchIP() {
                 try {
