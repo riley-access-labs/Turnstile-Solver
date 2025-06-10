@@ -27,51 +27,16 @@ stop_xrdp_services() {
     exit 0
 }
 
-if id "root" &>/dev/null; then
-    echo "root:root" | chpasswd || {
-        echo "Failed to update password."
-        exit 1
-    }
-else
-    if ! getent group root >/dev/null; then
-        addgroup root
-    fi
-
-    useradd -m -s /bin/bash -g root root || {
-        echo "Failed to create user."
-        exit 1
-    }
-    echo "root:root" | chpasswd || {
-        echo "Failed to set password."
-        exit 1
-    }
-    usermod -aG sudo root || {
-        echo "Failed to add user to sudo."
-        exit 1
-    }
-fi
-
-if [ -n "$TZ" ]; then
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
-    echo $TZ >/etc/timezone
-fi
-
-mkdir -p /root/Desktop
-
-cd /root/Desktop || {
-    echo "Failed to change directory to /root/Desktop"
-    exit 1
-}
-
-git clone https://github.com/riley-access-labs/Turnstile-Solver.git
-cd Turnstile-Solver || {
+# Update repository if needed
+cd /root/Desktop/Turnstile-Solver || {
     echo "Failed to change directory to Turnstile-Solver"
     exit 1
 }
 
-pip3 install -r requirements.txt --break-system-packages
-
-python3 -m camoufox fetch
+echo "Checking for repository updates..."
+git pull origin main || {
+    echo "Failed to pull latest changes, continuing with existing code..."
+}
 
 trap "stop_xrdp_services" SIGKILL SIGTERM SIGHUP SIGINT EXIT
 start_xrdp_services
