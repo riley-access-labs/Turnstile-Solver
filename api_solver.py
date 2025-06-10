@@ -92,6 +92,8 @@ class TurnstileAPIServer:
         self.proxy_support = proxy_support
         self.browser_pool = asyncio.Queue()
         self.browser_args = []
+        self.browsers_initialized = False
+        self.initialization_lock = asyncio.Lock()
         if useragent:
             self.browser_args.append(f"--user-agent={useragent}")
 
@@ -118,19 +120,23 @@ class TurnstileAPIServer:
 
     def _setup_routes(self) -> None:
         """Set up the application routes."""
-        self.app.before_serving(self._startup)
         self.app.route('/turnstile', methods=['GET'])(self.process_turnstile)
         self.app.route('/result', methods=['GET'])(self.get_result)
         self.app.route('/')(self.index)
 
-    async def _startup(self) -> None:
-        """Initialize the browser and page pool on startup."""
-        logger.info("Starting browser initialization")
-        try:
+    async def _ensure_browsers_initialized(self) -> None:
+        """Ensure browsers are initialized (called on first Turnstile request)."""
+        if self.browsers_initialized:
+            return
+            
+        async with self.initialization_lock:
+            # Double-check in case another task initialized while we were waiting
+            if self.browsers_initialized:
+                return
+                
+            logger.info("Initializing browsers on first Turnstile request")
             await self._initialize_browser()
-        except Exception as e:
-            logger.error(f"Failed to initialize browser: {str(e)}")
-            raise
+            self.browsers_initialized = True
 
     async def _initialize_browser(self) -> None:
         """Initialize the browser and create the page pool."""
@@ -162,6 +168,9 @@ class TurnstileAPIServer:
     async def _solve_turnstile(self, task_id: str, url: str, sitekey: str, action: str = None, cdata: str = None, proxy: str = None, useragent: str = None):
         """Solve the Turnstile challenge."""
         used_proxy = None
+
+        # Ensure browsers are initialized before proceeding
+        await self._ensure_browsers_initialized()
 
         index, browser = await self.browser_pool.get()
 
