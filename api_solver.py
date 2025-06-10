@@ -94,11 +94,7 @@ class TurnstileAPIServer:
         self.thread_count = thread
         self.proxy_support = proxy_support
         self.browser_pool = asyncio.Queue()
-        self.browser_args = [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--unhandled-rejections=strict",
-        ]
+        self.browser_args = []
         if useragent:
             self.browser_args.append(f"--user-agent={useragent}")
 
@@ -260,9 +256,6 @@ class TurnstileAPIServer:
 
             await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
             await page.goto(url_with_slash)
-            if self.debug:
-                logger.debug(f"Browser {index}: Waiting for network idle")
-            await page.wait_for_load_state("networkidle")
 
             if self.debug:
                 logger.debug(f"Browser {index}: Waiting for DOM Content Loaded")
