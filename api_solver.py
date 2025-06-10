@@ -11,6 +11,11 @@ from quart import Quart, request, jsonify
 from camoufox.async_api import AsyncCamoufox
 from patchright.async_api import async_playwright
 
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
+
 
 COLORS = {
     'MAGENTA': '\033[35m',
@@ -61,6 +66,13 @@ class TurnstileAPIServer:
         <title>Turnstile Solver</title>
         <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>
         <script>
+            window.turnstileSuccess = false;
+            window.onCaptchaSuccess = function(token) {
+                window.turnstileSuccess = true;
+                window.turnstileToken = token;
+                console.log('Turnstile solved successfully:', token);
+            };
+            
             async function fetchIP() {
                 try {
                     const response = await fetch('https://checkip.amazonaws.com');
@@ -115,6 +127,20 @@ class TurnstileAPIServer:
                 json.dump(self.results, result_file, indent=4)
         except IOError as e:
             logger.error(f"Error saving results to file: {str(e)}")
+    
+    async def _save_results_async(self):
+        """Save results to results.json asynchronously."""
+        if aiofiles:
+            try:
+                async with aiofiles.open("results.json", "w") as result_file:
+                    await result_file.write(json.dumps(self.results, indent=4))
+                return
+            except Exception as e:
+                logger.error(f"Error saving results async: {str(e)}")
+        
+        # Fallback to sync save in thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._save_results)
 
     def _setup_routes(self) -> None:
         """Set up the application routes."""
@@ -140,12 +166,32 @@ class TurnstileAPIServer:
         elif self.browser_type == "camoufox":
             camoufox = AsyncCamoufox(headless=self.headless)
 
+        # Optimized browser arguments for better performance
+        optimized_args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox", 
+            "--disable-dev-shm-usage",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-features=TranslateUI,VizDisplayCompositor",
+            "--disable-background-networking",
+            "--disable-component-extensions-with-background-pages",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--disable-web-security",
+            "--aggressive-cache-discard",
+            "--memory-pressure-off"
+        ]
+
         for _ in range(self.thread_count):
             if self.browser_type in ['chromium', 'chrome', 'msedge']:
+                browser_args = self.browser_args + optimized_args
                 browser = await playwright.chromium.launch(
                     channel=self.browser_type,
                     headless=self.headless,
-                    args=self.browser_args
+                    args=browser_args
                 )
 
             elif self.browser_type == "camoufox":
@@ -238,66 +284,129 @@ class TurnstileAPIServer:
         
         context = await browser.new_context(**context_options)
 
+        # Optimize page settings for faster loading
         page = await context.new_page()
+        
+        # Disable unnecessary resources to speed up page load
+        await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,eot}", lambda route: route.abort())
+        await page.route("**/analytics*", lambda route: route.abort())
+        await page.route("**/gtag*", lambda route: route.abort())
+        await page.route("**/ga.js", lambda route: route.abort())
 
         start_time = time.time()
 
         try:
             if self.debug:
                 logger.debug(f"Browser {index}: Starting Turnstile solve for URL: {url} with Sitekey: {sitekey} | Proxy: {used_proxy}")
-                logger.debug(f"Browser {index}: Setting up page data and route")
 
             url_with_slash = url + "/" if not url.endswith("/") else url
             turnstile_div = f'<div id="cf-turnstile" class="cf-turnstile" data-sitekey="{sitekey}" data-callback="onCaptchaSuccess"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
             page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
             await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
-            await page.goto(url_with_slash)
+            await page.goto(url_with_slash, wait_until="domcontentloaded", timeout=15000)
+
+            # Wait for turnstile widget to load
+            await page.wait_for_selector(".cf-turnstile", timeout=10000)
+            
+            # Set widget dimensions immediately after it loads
+            await page.eval_on_selector(".cf-turnstile", "el => el.style.width = '70px'")
 
             if self.debug:
-                logger.debug(f"Browser {index}: Setting up Turnstile widget dimensions")
+                logger.debug(f"Browser {index}: Starting optimized Turnstile response retrieval")
 
-            await page.eval_on_selector("//div[@class='cf-turnstile']", "el => el.style.width = '70px'")
-
-            if self.debug:
-                logger.debug(f"Browser {index}: Starting Turnstile response retrieval loop")
-
-            for _ in range(20):
+            # Optimized polling with exponential backoff and multiple detection methods
+            attempt = 0
+            max_attempts = 30
+            poll_interval = 0.1  # Start with faster polling
+            
+            while attempt < max_attempts:
                 try:
-                    # Click the captcha first before trying to get response
-                    await page.locator("//div[@class='cf-turnstile']").click(timeout=1000)
-                    await asyncio.sleep(0.5)
+                    # Try multiple methods to detect completion
+                    turnstile_check = None
                     
-                    turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=2000)
-                    if turnstile_check == "":
-                        if self.debug:
-                            logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
+                    # Method 1: Check input value
+                    try:
+                        turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=500)
+                        if turnstile_check and turnstile_check.strip():
+                            break
+                    except:
+                        pass
+                    
+                    # Method 2: Check for success callback
+                    try:
+                        success_indicator = await page.evaluate("() => window.turnstileSuccess || false", timeout=500)
+                        if success_indicator:
+                            turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=500)
+                            if turnstile_check and turnstile_check.strip():
+                                break
+                    except:
+                        pass
+                    
+                    # Method 3: Check widget state
+                    try:
+                        widget_solved = await page.evaluate("""
+                            () => {
+                                const widget = document.querySelector('.cf-turnstile');
+                                return widget && widget.querySelector('input[name="cf-turnstile-response"]')?.value;
+                            }
+                        """, timeout=500)
+                        if widget_solved and widget_solved.strip():
+                            turnstile_check = widget_solved
+                            break
+                    except:
+                        pass
+                    
+                    # Click turnstile if no response yet (only first few attempts)
+                    if attempt < 5:
+                        try:
+                            await page.locator(".cf-turnstile").click(timeout=500)
+                        except:
+                            pass
+                    
+                    attempt += 1
+                    
+                    # Adaptive polling with exponential backoff
+                    if attempt < 10:
+                        await asyncio.sleep(poll_interval)
+                    elif attempt < 20:
+                        await asyncio.sleep(0.3)
                     else:
-                        elapsed_time = round(time.time() - start_time, 3)
+                        await asyncio.sleep(0.5)
+                        
+                    if self.debug and attempt % 10 == 0:
+                        logger.debug(f"Browser {index}: Attempt {attempt} - Still waiting for Turnstile response")
+                        
+                except Exception as e:
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Polling attempt {attempt} failed: {str(e)}")
+                    attempt += 1
+                    await asyncio.sleep(poll_interval)
 
-                        logger.success(f"Browser {index}: Successfully solved captcha - {COLORS.get('MAGENTA')}{turnstile_check[:10]}{COLORS.get('RESET')} in {COLORS.get('GREEN')}{elapsed_time}{COLORS.get('RESET')} Seconds")
-
-                        self.results[task_id] = {"value": turnstile_check, "elapsed_time": elapsed_time}
-                        self._save_results()
-                        break
-                except:
-                    pass
-
-            if self.results.get(task_id) == "CAPTCHA_NOT_READY":
+            # Check final result
+            if turnstile_check and turnstile_check.strip():
+                elapsed_time = round(time.time() - start_time, 3)
+                logger.success(f"Browser {index}: Successfully solved captcha - {COLORS.get('MAGENTA')}{turnstile_check[:10]}{COLORS.get('RESET')} in {COLORS.get('GREEN')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                
+                self.results[task_id] = {"value": turnstile_check, "elapsed_time": elapsed_time}
+                # Save results asynchronously to avoid blocking
+                asyncio.create_task(self._save_results_async())
+            else:
                 elapsed_time = round(time.time() - start_time, 3)
                 self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
                 if self.debug:
-                    logger.error(f"Browser {index}: Error solving Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                    logger.error(f"Browser {index}: Failed to solve Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+
         except Exception as e:
             elapsed_time = round(time.time() - start_time, 3)
             self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
             if self.debug:
                 logger.error(f"Browser {index}: Error solving Turnstile: {str(e)}")
         finally:
-            if self.debug:
-                logger.debug(f"Browser {index}: Clearing page state")
-
-            await context.close()
+            try:
+                await context.close()
+            except:
+                pass
             await self.browser_pool.put((index, browser))
 
     async def process_turnstile(self):
@@ -319,10 +428,20 @@ class TurnstileAPIServer:
         self.results[task_id] = "CAPTCHA_NOT_READY"
 
         try:
-            asyncio.create_task(self._solve_turnstile(task_id=task_id, url=url, sitekey=sitekey, action=action, cdata=cdata, proxy=proxy, useragent=useragent))
+            # Add timeout to prevent hanging requests
+            asyncio.create_task(
+                asyncio.wait_for(
+                    self._solve_turnstile(task_id=task_id, url=url, sitekey=sitekey, action=action, cdata=cdata, proxy=proxy, useragent=useragent),
+                    timeout=45.0  # 45 second timeout
+                )
+            )
 
             if self.debug:
                 logger.debug(f"Request completed with taskid {task_id}.")
+            return jsonify({"task_id": task_id}), 202
+        except asyncio.TimeoutError:
+            logger.error(f"Request timed out for task {task_id}")
+            self.results[task_id] = {"value": "CAPTCHA_TIMEOUT", "elapsed_time": 45.0}
             return jsonify({"task_id": task_id}), 202
         except Exception as e:
             logger.error(f"Unexpected error processing request: {str(e)}")
