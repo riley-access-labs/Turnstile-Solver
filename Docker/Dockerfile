@@ -34,7 +34,8 @@ RUN apt-get update && \
     xfce4-terminal \
     python3-pip \
     ca-certificates \
-    xvfb
+    xvfb \
+    firefox
 
 RUN apt remove -y light-locker xscreensaver && \
     apt autoremove -y && \
