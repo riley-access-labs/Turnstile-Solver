@@ -72,8 +72,12 @@ class TurnstileAPIServer:
                 }
             }
             window.onload = fetchIP;
+            window.turnstileToken = null;
+            window.turnstileSuccess = false;
             window.onCaptchaSuccess = function(token) {
                 console.log('Turnstile solved successfully:', token);
+                window.turnstileToken = token;
+                window.turnstileSuccess = true;
             };
         </script>
     </head>
@@ -276,7 +280,7 @@ class TurnstileAPIServer:
 
             for _ in range(20):
                 try:
-                    turnstile_check = await page.input_value("//input[@name='cf-turnstile-response']", timeout=2000)
+                    turnstile_check = await page.input_value("[name=cf-turnstile-response]", timeout=2000)
                     if turnstile_check == "":
                         if self.debug:
                             logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
@@ -294,11 +298,31 @@ class TurnstileAPIServer:
                 except:
                     pass
 
+            # Fallback check using window.turnstileToken if primary method didn't find token
             if self.results.get(task_id) == "CAPTCHA_NOT_READY":
-                elapsed_time = round(time.time() - start_time, 3)
-                self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
-                if self.debug:
-                    logger.error(f"Browser {index}: Error solving Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                try:
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Attempting fallback using window.turnstileToken")
+                    
+                    window_token = await page.evaluate("window.turnstileToken")
+                    if window_token and window_token != "":
+                        elapsed_time = round(time.time() - start_time, 3)
+                        
+                        logger.success(f"Browser {index}: Successfully solved captcha via fallback - {COLORS.get('MAGENTA')}{window_token[:10]}{COLORS.get('RESET')} in {COLORS.get('GREEN')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                        
+                        self.results[task_id] = {"value": window_token, "elapsed_time": elapsed_time}
+                        self._save_results()
+                    else:
+                        elapsed_time = round(time.time() - start_time, 3)
+                        self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
+                        if self.debug:
+                            logger.error(f"Browser {index}: Error solving Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+                except Exception as e:
+                    elapsed_time = round(time.time() - start_time, 3)
+                    self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
+                    if self.debug:
+                        logger.error(f"Browser {index}: Error in fallback check: {str(e)}")
+
         except Exception as e:
             elapsed_time = round(time.time() - start_time, 3)
             self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
