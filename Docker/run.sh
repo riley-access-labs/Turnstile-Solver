@@ -76,5 +76,5 @@ start_xrdp_services
 
 if [ "$RUN_API_SOLVER" = "true" ]; then
     echo "Starting API solver in headful mode..."
-    xvfb-run -a python3 /root/Desktop/Turnstile-Solver/api_solver.py --browser_type chrome --host 0.0.0.0 --debug=$DEBUG
+    xvfb-run -a python3 /root/Desktop/Turnstile-Solver/api_solver.py --host 0.0.0.0 --debug=$DEBUG
 fi
