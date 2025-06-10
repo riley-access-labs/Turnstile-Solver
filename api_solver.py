@@ -262,6 +262,9 @@ class TurnstileAPIServer:
             if self.debug:
                 logger.debug(f"Browser {index}: Waiting for DOM Content Loaded")
             await page.wait_for_load_state("domcontentloaded")
+            if self.debug:
+                logger.debug(f"Browser {index}: Waiting for network idle")
+            await page.wait_for_load_state("networkidle")
 
             if self.debug:
                 logger.debug(f"Browser {index}: Setting up Turnstile widget dimensions")
